@@ -1,4 +1,5 @@
-# %% 1. Importación de paquetes ------------------------------
+# %% 1. Importación de paquetes 
+# ------------------------------
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -9,7 +10,7 @@ from scipy.stats import jarque_bera, probplot
 # Módulos de statsmodels
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statsmodels.stats.diagnostic import acorr_ljungbox, het_arch
-from statsmodels.tsa.statespace.sarimax import SARIMA
+from statsmodels.tsa.statespace.sarimax import SARIMAX as SARIMA
 from statsmodels.tsa.stattools import adfuller, kpss
 
 
@@ -110,3 +111,173 @@ plt.ylabel("Pasajeros")
 plt.grid(True, linestyle="--", alpha=0.6)
 plt.show()
 # %%
+
+
+
+#-------------------------------------------------------------
+#CORRELOGRAMAS: FAC Y FACP
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+# %% 2. Correlogramas (FAC y FACP en Niveles) -------------------
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+# Función de Autocorrelación (FAC / ACF)
+plot_acf(
+    pasajeros_serie, 
+    ax=axes[0], 
+    lags=24, 
+    title="Función de Autocorrelación (FAC) - Niveles"
+)
+axes[0].grid(True, linestyle="--", alpha=0.5)
+axes[0].set_xlabel("Rezagos (Meses)")
+axes[0].set_ylabel("Autocorrelación")
+
+# Función de Autocorrelación Parcial (FACP / PACF)
+plot_pacf(
+    pasajeros_serie, 
+    ax=axes[1], 
+    lags=24, 
+    title="Función de Autocorrelación Parcial (FACP) - Niveles",
+    method="ywm"
+)
+axes[1].grid(True, linestyle="--", alpha=0.5)
+axes[1].set_xlabel("Rezagos (Meses)")
+axes[1].set_ylabel("Autocorrelación Parcial")
+
+plt.tight_layout()
+plt.show()
+
+# %%
+#--------------------------------------------------------------------
+#PRUEBAS PARA SABER SI ES ESTACIONARIA O NO
+# %% 3. Pruebas de Estacionariedad en Niveles (ADF y KPSS) ---------
+from statsmodels.tsa.stattools import adfuller, kpss
+
+print("\n" + "="*50)
+print("=== PRUEBA DICKEY-FULLER AUMENTADA (ADF) - NIVELES ===")
+print("="*50)
+adf_result = adfuller(pasajeros_serie.dropna())
+print(f"Estadístico ADF: {adf_result[0]:.4f}")
+print(f"p-valor: {adf_result[1]:.4f}")
+print("Valores Críticos:")
+for key, value in adf_result[4].items():
+    print(f"   {key}: {value:.4f}")
+
+print("\n" + "="*50)
+print("=== PRUEBA KPSS - NIVELES ===")
+print("="*50)
+kpss_result = kpss(pasajeros_serie.dropna(), regression="c", nlags="auto")
+print(f"Estadístico KPSS: {kpss_result[0]:.4f}")
+print(f"p-valor: {kpss_result[1]:.4f}")
+print("Valores Críticos:")
+for key, value in kpss_result[3].items():
+    print(f"   {key}: {value:.4f}")
+
+# %%
+
+#------------------------------------------------------------------
+#APLICACION PRIMERAS DIFERENCIAS PARA CORREGIR LA TENDENCIA NO ESTACIONARIA 
+# %% 4. Transformación a Primera Diferencia Ordinaria (d=1) ---------
+pasajeros_diff = pasajeros_serie.diff().dropna()
+
+# Gráfica de la serie en primera diferencia
+plt.figure(figsize=(10, 4))
+plt.plot(pasajeros_diff, color="teal", linewidth=1.2)
+plt.title("Primera Diferencia del Tráfico de Pasajeros (BOG-MDE)")
+plt.xlabel("Fecha")
+plt.ylabel("Diferencia (ΔYt)")
+plt.grid(True, linestyle="--", alpha=0.6)
+plt.show()
+
+# Correlogramas (FAC y FACP) en primera diferencia
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+plot_acf(
+    pasajeros_diff, 
+    ax=axes[0], 
+    lags=24, 
+    title="FAC - Primera Diferencia (d=1)"
+)
+axes[0].grid(True, linestyle="--", alpha=0.5)
+
+plot_pacf(
+    pasajeros_diff, 
+    ax=axes[1], 
+    lags=24, 
+    title="FACP - Primera Diferencia (d=1)",
+    method="ywm"
+)
+axes[1].grid(True, linestyle="--", alpha=0.5)
+
+plt.tight_layout()
+plt.show()
+
+# Pruebas formales de Estacionariedad sobre la Serie Diferenciada
+print("\n" + "="*50)
+print("=== PRUEBA ADF (Serie Diferenciada) ===")
+print("="*50)
+adf_diff = adfuller(pasajeros_diff)
+print(f"Estadístico ADF: {adf_diff[0]:.4f}")
+print(f"p-valor: {adf_diff[1]:.4f}")
+
+print("\n" + "="*50)
+print("=== PRUEBA KPSS (Serie Diferenciada) ===")
+print("="*50)
+kpss_diff = kpss(pasajeros_diff, regression="c", nlags="auto")
+print(f"Estadístico KPSS: {kpss_diff[0]:.4f}")
+print(f"p-valor: {kpss_diff[1]:.4f}")
+# %%
+
+#ETAPA 2: ESTIMACION MODELO SARIMA
+
+#------------------------------------------------------------------------
+# %% 5. Estimación y Selección de Modelos SARIMA --------------------
+import itertools
+import warnings
+warnings.filterwarnings("ignore")
+
+# Definir rangos para los parámetros (p, d, q) x (P, D, Q)s
+p = q = range(0, 3)
+d = [1]
+P = Q = range(0, 2)
+D = [1]
+s = 12
+
+pdq = list(itertools.product(p, d, q))
+seasonal_pdq = [(x[0], x[1], x[2], s) for x in list(itertools.product(P, D, Q))]
+
+results_list = []
+
+print("Buscando el mejor modelo SARIMA...")
+for param in pdq:
+    for param_seasonal in seasonal_pdq:
+        try:
+            mod = SARIMA(
+                pasajeros_serie,
+                order=param,
+                seasonal_order=param_seasonal,
+                enforce_stationarity=False,
+                enforce_invertibility=False
+            )
+            results = mod.fit(disp=False)
+            results_list.append({
+                'order': param,
+                'seasonal_order': param_seasonal,
+                'aic': results.aic,
+                'bic': results.bic
+            })
+        except:
+            continue
+
+# Convertir a DataFrame y ordenar por menor AIC
+df_results = pd.DataFrame(results_list).sort_values(by='aic').reset_index(drop=True)
+
+print("\n=== TOP 5 MEJORES MODELOS (Ordenados por AIC) ===")
+print(df_results.head(5))
+
+
+#-----------------------------------------------------------------
+#SE ELEIGE EL MODELO 0 (0,1,2)
+
+#---------------------------------------------------------------------------
+#ETAPA 3: SUPUESTOS
+
