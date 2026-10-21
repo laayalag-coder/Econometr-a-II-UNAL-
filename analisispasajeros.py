@@ -276,8 +276,99 @@ print(df_results.head(5))
 
 
 #-----------------------------------------------------------------
-#SE ELEIGE EL MODELO 0 (0,1,2)
+#SE ELIGE EL MODELO 0 (0,1,2)
 
 #---------------------------------------------------------------------------
 #ETAPA 3: SUPUESTOS
+
+# ============================================================
+# ETAPA 3: VALIDACIÓN SUPUESTOS DEL MODELO SARIMA
+# ============================================================
+
+from statsmodels.stats.diagnostic import acorr_ljungbox, het_arch
+from statsmodels.graphics.tsaplots import plot_acf
+from scipy.stats import jarque_bera
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# 1. Recuperar el modelo con menor AIC de la tabla
+mejor_modelo = df_results.iloc[0]
+
+orden = tuple(mejor_modelo["order"])
+orden_estacional = tuple(mejor_modelo["seasonal_order"])
+
+print("Orden ARIMA:", orden)
+print("Orden estacional:", orden_estacional)
+
+# 2. Estimar el modelo seleccionado
+modelo_final = SARIMA(
+    pasajeros_serie,
+    order=orden,
+    seasonal_order=orden_estacional,
+    enforce_stationarity=False,
+    enforce_invertibility=False
+)
+
+resultado_final = modelo_final.fit(disp=False)
+
+print(resultado_final.summary())
+
+# 3. Extraer los residuos
+residuos = pd.Series(
+    resultado_final.resid,
+    index=pasajeros_serie.index
+).dropna()
+
+# 4. Gráfico de los residuos
+fig, ax = plt.subplots(figsize=(10, 4))
+ax.plot(residuos)
+ax.axhline(0, color="black", linewidth=1)
+ax.set_title("Residuos del modelo SARIMA")
+ax.set_xlabel("Fecha")
+ax.set_ylabel("Residuo")
+ax.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+# 5. ACF de los residuos
+plot_acf(residuos, lags=24)
+plt.title("FAC de los residuos")
+plt.tight_layout()
+plt.show()
+
+# 6. Prueba de Ljung-Box
+p, d, q = orden
+P, D, Q, s = orden_estacional
+
+grados_libertad = p + q + P + Q
+
+rezagos = [12, 24]
+rezagos = [lag for lag in rezagos if lag > grados_libertad
+           and lag < len(residuos)]
+
+if rezagos:
+    prueba_lb = acorr_ljungbox(
+        residuos,
+        lags=rezagos,
+        model_df=grados_libertad,
+        return_df=True
+    )
+    print("\nPRUEBA DE LJUNG-BOX")
+    print(prueba_lb)
+else:
+    print("No hay rezagos suficientes para Ljung-Box.")
+
+# 7. Prueba de normalidad Jarque-Bera
+jb = jarque_bera(residuos)
+
+print("\nPRUEBA JARQUE-BERA")
+print("Estadístico:", jb.statistic)
+print("P-valor:", jb.pvalue)
+
+# 8. Prueba ARCH-LM
+arch = het_arch(residuos, nlags=12)
+
+print("\nPRUEBA ARCH-LM")
+print("Estadístico:", arch[0])
+print("P-valor:", arch[1])
 
